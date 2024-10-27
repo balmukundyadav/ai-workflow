@@ -1,0 +1,246 @@
+Sure! Let’s add authentication to all FastAPI endpoints using OAuth2 with JWT (JSON Web Tokens). This will ensure that only authenticated users can access the endpoints.
+
+Step-by-Step Guide
+Install Dependencies:
+Ensure you have the necessary dependencies installed:
+pip install fastapi[all] python-jose passlib[bcrypt]
+
+Set Up Authentication:
+Create utility functions for password hashing and JWT token creation.
+Add an authentication dependency to secure the endpoints.
+Example Code
+Here’s how to integrate authentication into your FastAPI application:
+
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from typing import Optional
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+from langchain_community.document_loaders import ConfluenceLoader
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+# Confluence setup
+confluence_base_url = "https://<your-confluence-instance>.atlassian.net/wiki/rest/api"
+confluence_auth = ("<your-email>", "<your-api-token>")
+
+# Azure OpenAI Embeddings setup
+azure_openai_endpoint = "https://<your-openai-endpoint>.openai.azure.com/"
+azure_openai_api_key = "<your-openai-api-key>"
+embeddings = AzureOpenAIEmbeddings(
+    azure_endpoint=azure_openai_endpoint,
+    api_key=azure_openai_api_key,
+    model="text-embedding-ada-002"
+)
+
+# Authentication setup
+SECRET_KEY = "your_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class User(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+
+class UserInDB(User):
+    hashed_password: str
+
+fake_users_db = {
+    "johndoe": {
+        "username": "johndoe",
+        "full_name": "John Doe",
+        "email": "johndoe@example.com",
+        "hashed_password": pwd_context.hash("secret"),
+        "disabled": False,
+    }
+}
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def get_user(db, username: str):
+    if username in db:
+        user_dict = db[username]
+        return UserInDB(**user_dict)
+
+def authenticate_user(fake_db, username: str, password: str):
+    user = get_user(fake_db, username)
+    if not user:
+        return False
+    if not verify_password(password, user.hashed_password):
+        return False
+    return user
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(fake_users_db, username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
+    if current_user.disabled:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent, current_user: User = Depends(get_current_active_user)):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+        content_chunks = split_content(content)
+
+        for chunk in content_chunks:
+            content_vector = embeddings.embed_query(chunk.page_content)
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": chunk.page_content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+
+            if event.webhookEvent == "page_created":
+                logging.info(f"Creating new document for page ID: {page_id}")
+                search_client.upload_documents(documents=[document])
+            elif event.webhookEvent == "page_updated":
+                logging.info(f"Updating document for page ID: {page_id}")
+                existing_doc = search_client.get_document(key=page_id)
+                if existing_doc and existing_doc["last_modified"] < last_modified:
+                    search_client.merge_or_upload_documents(documents=[document])
+            elif event.webhookEvent == "page_deleted":
+                logging.info(f"Deleting document for page ID: {page_id}")
+                search_client.delete_documents(documents=[{"page_id": page_id}])
+            elif event.webhookEvent in ["page_moved", "page_renamed"]:
+                logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+                search_client.merge_or_upload_documents(documents=[document])
+            else:
+                logging.warning(f"Unsupported event type: {event.webhookEvent}")
+                raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/index_space/{space_key}")
+async def index_space(space_key: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        indexed_documents = []
+        for doc in documents:
+            page_id = doc.metadata["id"]
+            title = doc.metadata["title"]
+            content = doc.page_content
+            last_modified = doc.metadata["version"]["when"]
+            content_chunks = split_content(content)
+
+            for chunk in content_chunks:
+                content_vector = embeddings.embed_query(chunk.page_content)
+                document = {
+                    "page_id": page_id,
+                    "title": title,
+                    "content": chunk.page_content,
+                    "last_modified": last_modified,
+                    "content_vector": Vector(value=content_vector)
+                }
+                indexed_documents.append(document)
+
+        search_client.upload_documents(documents=indexed_documents)
+        return {"status": "success", "indexed_pages": len(indexed_documents)}
+    except Exception as e:
+        logging.error(f"Error indexing space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_space/{space_key}")
+async def delete_space(space_key: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        page_ids = [{"page_id": doc.metadata["id"]} for doc in documents]
+
+        if page_ids:
+            search_client.delete_documents(documents=page_ids)
+            logging.info(f"Deleted {len(page_ids)} documents for space: {space_key}")
+            return {"status": "success", "deleted_pages": len(page_ids)}
+        else:
+            logging.info(f"No pages found for space: {space_key}")
+            return {"status": "success", "deleted_pages": 0}
+    except Exception
+AI-generated code. Review and use carefully. More info on FAQ.

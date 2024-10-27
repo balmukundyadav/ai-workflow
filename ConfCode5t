@@ -1,0 +1,240 @@
+Please include logic to maintain chat history temparoy in memory if redis and firestore are not available
+Copilot
+Using
+the web
+Sent by Copilot:
+Sure! To maintain chat history temporarily in memory if Redis and Firestore are not available, we can use a simple in-memory dictionary. This will allow us to store chat history for the duration of the application’s runtime. Here’s how you can integrate this logic into the existing structure:
+
+Step-by-Step Guide
+Set Up In-Memory Storage:
+Use a dictionary to store chat history temporarily.
+Modify Utility Functions:
+Update utility functions to check for Redis and Firestore availability and fall back to in-memory storage if necessary.
+Integrate In-Memory Storage in FastAPI:
+Ensure the chat endpoints use the in-memory storage when Redis and Firestore are not available.
+Project Structure
+ai-workflow/
+├── app.py
+├── auth/
+│   ├── __init__.py
+│   ├── auth.py
+│   ├── models.py
+│   └── utils.py
+├── confluence/
+│   ├── __init__.py
+│   ├── loader.py
+│   └── utils.py
+├── search/
+│   ├── __init__.py
+│   ├── client.py
+│   ├── models.py
+│   └── utils.py
+├── embeddings/
+│   ├── __init__.py
+│   └── azure_openai.py
+├── chat/
+│   ├── __init__.py
+│   ├── models.py
+│   ├── utils.py
+│   └── chat.py
+├── config.py
+└── requirements.txt
+
+chat/utils.py
+Update utility functions to include in-memory storage.
+
+Python
+
+import redis
+from google.cloud import firestore
+from config import REDIS_HOST, REDIS_PORT, FIRESTORE_PROJECT_ID
+
+# Initialize Redis client
+try:
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
+    redis_client.ping()
+    redis_available = True
+except (redis.ConnectionError, redis.TimeoutError):
+    redis_available = False
+
+# Initialize Firestore client
+try:
+    firestore_client = firestore.Client(project=FIRESTORE_PROJECT_ID)
+    firestore_available = True
+except Exception:
+    firestore_available = False
+
+# In-memory storage
+in_memory_store = {}
+
+def save_message(session_id: str, message: dict):
+    if redis_available:
+        redis_client.rpush(session_id, message)
+    elif firestore_available:
+        doc_ref = firestore_client.collection("chat_history").document(session_id)
+        doc_ref.update({"messages": firestore.ArrayUnion([message])})
+    else:
+        if session_id not in in_memory_store:
+            in_memory_store[session_id] = []
+        in_memory_store[session_id].append(message)
+
+def get_messages(session_id: str):
+    if redis_available:
+        return redis_client.lrange(session_id, 0, -1)
+    elif firestore_available:
+        doc_ref = firestore_client.collection("chat_history").document(session_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return doc.to_dict().get("messages", [])
+        return []
+    else:
+        return in_memory_store.get(session_id, [])
+AI-generated code. Review and use carefully. More info on FAQ.
+chat/chat.py
+Update the chat endpoint to use the new utility functions.
+
+Python
+
+from fastapi import APIRouter, Depends, HTTPException
+from .models import ChatMessage, ChatHistory
+from .utils import save_message, get_messages
+from auth.utils import get_current_active_user
+from embeddings.azure_openai import embeddings
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain.llms import AzureOpenAI
+from config import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY
+
+router = APIRouter()
+
+# Azure OpenAI LLM setup
+llm = AzureOpenAI(
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_key=AZURE_OPENAI_API_KEY,
+    model="text-davinci-003"
+)
+
+@router.post("/chat")
+async def chat(session_id: str, message: ChatMessage, current_user: User = Depends(get_current_active_user)):
+    try:
+        # Save message
+        save_message(session_id, message.dict())
+
+        # Retrieve chat history
+        chat_history = get_messages(session_id)
+
+        # Use LangChain prompt to generate a response
+        prompt_template = PromptTemplate(
+            input_variables=["history", "input"],
+            template="Based on the following chat history: {history}, respond to the input: {input}"
+        )
+        chain = LLMChain(llm=llm, prompt=prompt_template)
+        response = chain.run(history=chat_history, input=message.content)
+
+        # Save LLM response
+        response_message = ChatMessage(role="assistant", content=response)
+        save_message(session_id, response_message.dict())
+
+        return {"response": response}
+    except Exception as e:
+        logging.error(f"Error during chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+AI-generated code. Review and use carefully. More info on FAQ.
+Summary
+By following this approach, you can maintain chat history temporarily in memory if Redis and Firestore are not available. The utility functions check for the availability of Redis and Firestore and fall back to in-memory storage if necessary. This ensures that the chat history is always maintained, providing context for the LLM to generate relevant responses. If you have any specific requirements or need further customization, feel free to ask!
+
+Learn more
+
+1
+
+github.com
+2
+
+atamel.dev
+3
+
+python.langchain.com
+You
+Sent by you:
+please update code where llm should reponde based on content information  received from seaech index as well as chat history wherever possible
+Copilot
+Using
+the web
+Sent by Copilot:
+Sure! Let’s update the code so that the LLM responds based on both the content information received from the search index and the chat history. We’ll modify the chat endpoint to include search results in the context provided to the LLM.
+
+Updated chat/chat.py
+We’ll update the chat endpoint to fetch relevant documents from the search index and include them in the context for the LLM response.
+
+Python
+
+from fastapi import APIRouter, Depends, HTTPException
+from .models import ChatMessage, ChatHistory
+from .utils import save_message, get_messages
+from auth.utils import get_current_active_user
+from embeddings.azure_openai import embeddings
+from search.utils import search_documents
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain.llms import AzureOpenAI
+from config import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY
+
+router = APIRouter()
+
+# Azure OpenAI LLM setup
+llm = AzureOpenAI(
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_key=AZURE_OPENAI_API_KEY,
+    model="text-davinci-003"
+)
+
+@router.post("/chat")
+async def chat(session_id: str, message: ChatMessage, current_user: User = Depends(get_current_active_user)):
+    try:
+        # Save message
+        save_message(session_id, message.dict())
+
+        # Retrieve chat history
+        chat_history = get_messages(session_id)
+
+        # Perform search based on the latest user message
+        search_results = search_documents(message.content, embeddings)
+        documents = [doc["content"] for doc in search_results]
+
+        # Use LangChain prompt to generate a response
+        prompt_template = PromptTemplate(
+            input_variables=["history", "documents", "input"],
+            template="Based on the following chat history: {history} and these documents: {documents}, respond to the input: {input}"
+        )
+        chain = LLMChain(llm=llm, prompt=prompt_template)
+        response = chain.run(history=chat_history, documents=documents, input=message.content)
+
+        # Save LLM response
+        response_message = ChatMessage(role="assistant", content=response)
+        save_message(session_id, response_message.dict())
+
+        return {"response": response}
+    except Exception as e:
+        logging.error(f"Error during chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+AI-generated code. Review and use carefully. More info on FAQ.
+Updated search/utils.py
+Ensure the search_documents function returns the necessary document content.
+
+Python
+
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+from config import SEARCH_SERVICE_ENDPOINT, ADMIN_KEY, INDEX_NAME
+
+search_client = SearchClient(endpoint=SEARCH_SERVICE_ENDPOINT, index_name=INDEX_NAME, credential=ADMIN_KEY)
+
+def search_documents(query: str, embeddings):
+    vector = embeddings.embed_query(query)
+    search_results = search_client.search(query, include_total_count=True, vector={"value": vector, "fields": ["content_vector"]})
+    return [{"content": doc["content"], "score": doc["@search.score"]} for doc in search_results]
+AI-generated code. Review and use carefully. More info on FAQ.
+Summary
+With these updates, the LLM will generate responses based on both the chat history and relevant documents retrieved from the search index. This approach ensures that the responses are more informed and contextually relevant, leveraging both the ongoing conversation and the indexed content.
+
+If you have any further questions or need additional customization, feel free to ask!

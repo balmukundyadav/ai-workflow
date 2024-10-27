@@ -1,0 +1,772 @@
+Sure! Let’s add an endpoint to update the search index using a page_id. This endpoint will fetch the page content from Confluence, generate the content vector using LangChain’s Azure OpenAI embeddings, and update the document in the Azure Search index.
+
+Example Code
+Here’s how to set up the FastAPI endpoint to update the search index using a page_id:
+
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+from langchain_community.document_loaders import ConfluenceLoader
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+# Confluence setup
+confluence_base_url = "https://<your-confluence-instance>.atlassian.net/wiki/rest/api"
+confluence_auth = ("<your-email>", "<your-api-token>")
+
+# Azure OpenAI Embeddings setup
+azure_openai_endpoint = "https://<your-openai-endpoint>.openai.azure.com/"
+azure_openai_api_key = "<your-openai-api-key>"
+embeddings = AzureOpenAIEmbeddings(
+    azure_endpoint=azure_openai_endpoint,
+    api_key=azure_openai_api_key,
+    model="text-embedding-ada-002"
+)
+
+class ConfluenceEvent(BaseModel):
+    webhookEvent: str
+    id: str
+    title: str
+    body: dict
+    version: dict
+    space: dict
+
+def fetch_page_content(page_id: str):
+    url = f"{confluence_base_url}/content/{page_id}?expand=body.storage,version,space"
+    response = requests.get(url, auth=confluence_auth)
+    response.raise_for_status()
+    return response.json()
+
+def split_content(content: str):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=8000,
+        chunk_overlap=200,
+        length_function=len
+    )
+    return text_splitter.create_documents([content])
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+        content_chunks = split_content(content)
+
+        for chunk in content_chunks:
+            content_vector = embeddings.embed_query(chunk.page_content)
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": chunk.page_content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+
+            if event.webhookEvent == "page_created":
+                logging.info(f"Creating new document for page ID: {page_id}")
+                search_client.upload_documents(documents=[document])
+            elif event.webhookEvent == "page_updated":
+                logging.info(f"Updating document for page ID: {page_id}")
+                existing_doc = search_client.get_document(key=page_id)
+                if existing_doc and existing_doc["last_modified"] < last_modified:
+                    search_client.merge_or_upload_documents(documents=[document])
+            elif event.webhookEvent == "page_deleted":
+                logging.info(f"Deleting document for page ID: {page_id}")
+                search_client.delete_documents(documents=[{"page_id": page_id}])
+            elif event.webhookEvent in ["page_moved", "page_renamed"]:
+                logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+                search_client.merge_or_upload_documents(documents=[document])
+            else:
+                logging.warning(f"Unsupported event type: {event.webhookEvent}")
+                raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/index_space/{space_key}")
+async def index_space(space_key: str):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        indexed_documents = []
+        for doc in documents:
+            page_id = doc.metadata["id"]
+            title = doc.metadata["title"]
+            content = doc.page_content
+            last_modified = doc.metadata["version"]["when"]
+            content_chunks = split_content(content)
+
+            for chunk in content_chunks:
+                content_vector = embeddings.embed_query(chunk.page_content)
+                document = {
+                    "page_id": page_id,
+                    "title": title,
+                    "content": chunk.page_content,
+                    "last_modified": last_modified,
+                    "content_vector": Vector(value=content_vector)
+                }
+                indexed_documents.append(document)
+
+        search_client.upload_documents(documents=indexed_documents)
+        return {"status": "success", "indexed_pages": len(indexed_documents)}
+    except Exception as e:
+        logging.error(f"Error indexing space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_space/{space_key}")
+async def delete_space(space_key: str):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        page_ids = [{"page_id": doc.metadata["id"]} for doc in documents]
+
+        if page_ids:
+            search_client.delete_documents(documents=page_ids)
+            logging.info(f"Deleted {len(page_ids)} documents for space: {space_key}")
+            return {"status": "success", "deleted_pages": len(page_ids)}
+        else:
+            logging.info(f"No pages found for space: {space_key}")
+            return {"status": "success", "deleted_pages": 0}
+    except Exception as e:
+        logging.error(f"Error deleting space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_page/{page_id}")
+async def delete_page(page_id: str):
+    try:
+        search_client.delete_documents(documents=[{"page_id": page_id}])
+        logging.info(f"Deleted document for page ID: {page_id}")
+        return {"status": "success", "deleted_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error deleting page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/update_page/{page_id}")
+async def update_page(page_id: str):
+    try:
+        page_data = fetch_page_content(page_id)
+        title = page_data["title"]
+        content = page_data["body"]["storage"]["value"]
+        last_modified = page_data["version"]["when"]
+        content_chunks = split_content(content)
+
+        for chunk in content_chunks:
+            content_vector = embeddings.embed_query(chunk.page_content)
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": chunk.page_content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+
+            existing_doc = search_client.get_document(key=page_id)
+            if existing_doc:
+                logging.info(f"Updating document for page ID: {page_id}")
+                search_client.merge_or_upload_documents(documents=[document])
+            else:
+                logging.info(f"Creating new document for page ID: {page_id}")
+                search_client.upload_documents(documents=[document])
+
+        return {"status": "success", "updated_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error updating page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/search")
+async def search(query: str):
+    try:
+        # Perform hybrid search
+        search_results = search_client.search(query, include_total_count=True, vector={"value": embeddings.embed_query(query), "fields": ["content_vector"]})
+        
+        # Extract relevant documents
+        documents = [doc for doc in search_results]
+        
+        # Use LangChain prompt to generate a response
+        prompt_template = PromptTemplate(
+            input_variables=["query", "documents"],
+            template="Based on the following documents: {documents}, answer the query: {query}"
+        )
+        chain = LLMChain(llm=llm, prompt=prompt_template)
+        response = chain.run(query=query, documents=documents)
+        
+        return {"query": query, "response": response, "documents": documents}
+    except Exception as e:
+        logging.error(f"Error performing search: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Explanation
+Fetch Page Content: Implemented fetch_page_content to retrieve the content of a specific page from Confluence.
+Split Large Content: Used LangChain’s Recursive Character Text Splitter to split large content into chunks.
+Update Page Endpoint: Added a new FastAPI endpoint /update_page/{page_id} to update the search index using a page_id.
+Document Structure: Updated the document structure to include the content_vector field.
+
+================================
+Absolutely! Let’s integrate LangChain’s Recursive Character Text Splitter to handle large page content by splitting it into chunks and ensure that the Azure Search index does not have duplicate document records.
+
+Step-by-Step Guide
+Set Up Azure Search Index:
+Ensure your Azure Search index includes fields for page_id, title, content, last_modified, and content_vector.
+Load Pages from Confluence Space:
+Use the LangChain Confluence loader to fetch pages from a specific space.
+Generate Content Vectors:
+Use LangChain’s Azure OpenAI embeddings to generate vector representations of the page content.
+Split Large Content:
+Use LangChain’s Recursive Character Text Splitter to split large content into chunks.
+Index Pages in Azure Search:
+Create or update documents in the Azure Search index based on the fetched pages, ensuring no duplicates.
+Example Code
+Here’s an example of how to set up the FastAPI endpoint to load Confluence pages, split large content, embed the content, and index them in Azure Search:
+
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+from langchain_community.document_loaders import ConfluenceLoader
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+# Confluence setup
+confluence_base_url = "https://<your-confluence-instance>.atlassian.net/wiki/rest/api"
+confluence_auth = ("<your-email>", "<your-api-token>")
+
+# Azure OpenAI Embeddings setup
+azure_openai_endpoint = "https://<your-openai-endpoint>.openai.azure.com/"
+azure_openai_api_key = "<your-openai-api-key>"
+embeddings = AzureOpenAIEmbeddings(
+    azure_endpoint=azure_openai_endpoint,
+    api_key=azure_openai_api_key,
+    model="text-embedding-ada-002"
+)
+
+class ConfluenceEvent(BaseModel):
+    webhookEvent: str
+    id: str
+    title: str
+    body: dict
+    version: dict
+    space: dict
+
+def fetch_pages_from_space(space_key: str):
+    loader = ConfluenceLoader(
+        url=confluence_base_url,
+        username=confluence_auth[0],
+        api_key=confluence_auth[1]
+    )
+    documents = loader.load(space_key=space_key, include_attachments=True, limit=50)
+    return documents
+
+def split_content(content: str):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=8000,
+        chunk_overlap=200,
+        length_function=len
+    )
+    return text_splitter.create_documents([content])
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+        content_chunks = split_content(content)
+
+        for chunk in content_chunks:
+            content_vector = embeddings.embed_query(chunk.page_content)
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": chunk.page_content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+
+            if event.webhookEvent == "page_created":
+                logging.info(f"Creating new document for page ID: {page_id}")
+                search_client.upload_documents(documents=[document])
+            elif event.webhookEvent == "page_updated":
+                logging.info(f"Updating document for page ID: {page_id}")
+                existing_doc = search_client.get_document(key=page_id)
+                if existing_doc and existing_doc["last_modified"] < last_modified:
+                    search_client.merge_or_upload_documents(documents=[document])
+            elif event.webhookEvent == "page_deleted":
+                logging.info(f"Deleting document for page ID: {page_id}")
+                search_client.delete_documents(documents=[{"page_id": page_id}])
+            elif event.webhookEvent in ["page_moved", "page_renamed"]:
+                logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+                search_client.merge_or_upload_documents(documents=[document])
+            else:
+                logging.warning(f"Unsupported event type: {event.webhookEvent}")
+                raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/index_space/{space_key}")
+async def index_space(space_key: str):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        indexed_documents = []
+        for doc in documents:
+            page_id = doc.metadata["id"]
+            title = doc.metadata["title"]
+            content = doc.page_content
+            last_modified = doc.metadata["version"]["when"]
+            content_chunks = split_content(content)
+
+            for chunk in content_chunks:
+                content_vector = embeddings.embed_query(chunk.page_content)
+                document = {
+                    "page_id": page_id,
+                    "title": title,
+                    "content": chunk.page_content,
+                    "last_modified": last_modified,
+                    "content_vector": Vector(value=content_vector)
+                }
+                indexed_documents.append(document)
+
+        search_client.upload_documents(documents=indexed_documents)
+        return {"status": "success", "indexed_pages": len(indexed_documents)}
+    except Exception as e:
+        logging.error(f"Error indexing space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_space/{space_key}")
+async def delete_space(space_key: str):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        page_ids = [{"page_id": doc.metadata["id"]} for doc in documents]
+
+        if page_ids:
+            search_client.delete_documents(documents=page_ids)
+            logging.info(f"Deleted {len(page_ids)} documents for space: {space_key}")
+            return {"status": "success", "deleted_pages": len(page_ids)}
+        else:
+            logging.info(f"No pages found for space: {space_key}")
+            return {"status": "success", "deleted_pages": 0}
+    except Exception as e:
+        logging.error(f"Error deleting space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_page/{page_id}")
+async def delete_page(page_id: str):
+    try:
+        search_client.delete_documents(documents=[{"page_id": page_id}])
+        logging.info(f"Deleted document for page ID: {page_id}")
+        return {"status": "success", "deleted_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error deleting page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Explanation
+Vector Generation: Used LangChain’s Azure OpenAI embeddings to generate vectors from the page content.
+Fetch Pages from Space: Implemented fetch_pages_from_space using LangChain’s Confluence loader to retrieve all pages from a specific Confluence space.
+Split Large Content: Used LangChain’s Recursive Character Text Splitter to split large content into chunks.
+Index Space Endpoint: Added a new FastAPI endpoint /index_space/{space_key} to index all pages from a specified Confluence space.
+Delete Space Endpoint: Added a new FastAPI endpoint /delete_space/{space_key} to delete all pages’ content for a specific space from the Azure Search index.
+Delete Page Endpoint: Added a new FastAPI endpoint /delete_page/{page_id} to delete specific page content using page_id from the Azure Search index.
+Document Structure: Updated the document structure to include the content_vector field.
+Handling Events: Modified the event handling logic to include the content_vector when creating or updating documents.
+This setup ensures that your FastAPI server can handle Confluence events, split large content into manageable chunks, index pages from an entire space, delete all pages’ content for a specific space, and delete specific page content using page_id from the Azure Search index. Let me know if you need further customization or have any other questions!
+
+
+===================================================
+Absolutely! Let’s integrate the LangChain Confluence loader to load pages from a Confluence space and use LangChain’s Azure OpenAI embeddings to embed the page content into vectors.
+
+Step-by-Step Guide
+Set Up Azure Search Index:
+Ensure your Azure Search index includes fields for page_id, title, content, last_modified, and content_vector.
+Load Pages from Confluence Space:
+Use the LangChain Confluence loader to fetch pages from a specific space.
+Generate Content Vectors:
+Use LangChain’s Azure OpenAI embeddings to generate vector representations of the page content.
+Index Pages in Azure Search:
+Create or update documents in the Azure Search index based on the fetched pages.
+Example Code
+Here’s an example of how to set up the FastAPI endpoint to load Confluence pages, embed the content, and index them in Azure Search:
+
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+from langchain_community.document_loaders import ConfluenceLoader
+from langchain_openai import AzureOpenAIEmbeddings
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+# Confluence setup
+confluence_base_url = "https://<your-confluence-instance>.atlassian.net/wiki/rest/api"
+confluence_auth = ("<your-email>", "<your-api-token>")
+
+# Azure OpenAI Embeddings setup
+azure_openai_endpoint = "https://<your-openai-endpoint>.openai.azure.com/"
+azure_openai_api_key = "<your-openai-api-key>"
+embeddings = AzureOpenAIEmbeddings(
+    azure_endpoint=azure_openai_endpoint,
+    api_key=azure_openai_api_key,
+    model="text-embedding-ada-002"
+)
+
+class ConfluenceEvent(BaseModel):
+    webhookEvent: str
+    id: str
+    title: str
+    body: dict
+    version: dict
+    space: dict
+
+def fetch_pages_from_space(space_key: str):
+    loader = ConfluenceLoader(
+        url=confluence_base_url,
+        username=confluence_auth[0],
+        api_key=confluence_auth[1]
+    )
+    documents = loader.load(space_key=space_key, include_attachments=True, limit=50)
+    return documents
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+        content_vector = embeddings.embed_query(content)
+
+        document = {
+            "page_id": page_id,
+            "title": title,
+            "content": content,
+            "last_modified": last_modified,
+            "content_vector": Vector(value=content_vector)
+        }
+
+        if event.webhookEvent == "page_created":
+            logging.info(f"Creating new document for page ID: {page_id}")
+            search_client.upload_documents(documents=[document])
+        elif event.webhookEvent == "page_updated":
+            logging.info(f"Updating document for page ID: {page_id}")
+            existing_doc = search_client.get_document(key=page_id)
+            if existing_doc and existing_doc["last_modified"] < last_modified:
+                search_client.merge_or_upload_documents(documents=[document])
+        elif event.webhookEvent == "page_deleted":
+            logging.info(f"Deleting document for page ID: {page_id}")
+            search_client.delete_documents(documents=[{"page_id": page_id}])
+        elif event.webhookEvent in ["page_moved", "page_renamed"]:
+            logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+            search_client.merge_or_upload_documents(documents=[document])
+        else:
+            logging.warning(f"Unsupported event type: {event.webhookEvent}")
+            raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/index_space/{space_key}")
+async def index_space(space_key: str):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        indexed_documents = []
+        for doc in documents:
+            page_id = doc.metadata["id"]
+            title = doc.metadata["title"]
+            content = doc.page_content
+            last_modified = doc.metadata["version"]["when"]
+            content_vector = embeddings.embed_query(content)
+
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+            indexed_documents.append(document)
+
+        search_client.upload_documents(documents=indexed_documents)
+        return {"status": "success", "indexed_pages": len(indexed_documents)}
+    except Exception as e:
+        logging.error(f"Error indexing space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_space/{space_key}")
+async def delete_space(space_key: str):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        page_ids = [{"page_id": doc.metadata["id"]} for doc in documents]
+
+        if page_ids:
+            search_client.delete_documents(documents=page_ids)
+            logging.info(f"Deleted {len(page_ids)} documents for space: {space_key}")
+            return {"status": "success", "deleted_pages": len(page_ids)}
+        else:
+            logging.info(f"No pages found for space: {space_key}")
+            return {"status": "success", "deleted_pages": 0}
+    except Exception as e:
+        logging.error(f"Error deleting space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_page/{page_id}")
+async def delete_page(page_id: str):
+    try:
+        search_client.delete_documents(documents=[{"page_id": page_id}])
+        logging.info(f"Deleted document for page ID: {page_id}")
+        return {"status": "success", "deleted_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error deleting page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Explanation
+Vector Generation: Used LangChain’s Azure OpenAI embeddings to generate vectors from the page content.
+Fetch Pages from Space: Implemented fetch_pages_from_space using LangChain’s Confluence loader to retrieve all pages from a specific Confluence space.
+Index Space Endpoint: Added a new FastAPI endpoint /index_space/{space_key} to index all pages from a specified Confluence space.
+Delete Space Endpoint: Added a new FastAPI endpoint /delete_space/{space_key} to delete all pages’ content for a specific space from the Azure Search index.
+Delete Page Endpoint: Added a new FastAPI endpoint /delete_page/{page_id} to delete specific page content using page_id from the Azure Search index.
+Document Structure: Updated the document structure to include the content_vector field.
+Handling Events: Modified the event handling logic to include the content_vector when creating or updating documents.
+This setup ensures that your FastAPI server can handle Confluence events, index pages from an entire space, delete all pages’ content for a specific space, and delete specific page content using page_id from the Azure Search index. Let me know if you need further customization or have any other questions!
+
+
+
+====================================
+Sure! Let’s add an endpoint to delete specific page content using the page_id from the Azure Search index.
+
+Step-by-Step Guide
+Set Up Azure Search Index:
+Ensure your Azure Search index includes fields for page_id, title, content, last_modified, and content_vector.
+Delete Page from Azure Search Index:
+Create a FastAPI endpoint to delete a document from the Azure Search index based on the page_id.
+Example Code
+Here’s an example of how to set up the FastAPI endpoint to delete specific page content using page_id:
+
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+# Confluence setup
+confluence_base_url = "https://<your-confluence-instance>.atlassian.net/wiki/rest/api"
+confluence_auth = ("<your-email>", "<your-api-token>")
+
+class ConfluenceEvent(BaseModel):
+    webhookEvent: str
+    id: str
+    title: str
+    body: dict
+    version: dict
+    space: dict
+
+def generate_content_vector(content: str) -> list:
+    # Placeholder function to generate a vector from content
+    # Replace this with your actual vector generation logic
+    return [0.0] * 300  # Example: 300-dimensional zero vector
+
+def fetch_pages_from_space(space_key: str):
+    url = f"{confluence_base_url}/space/{space_key}/content"
+    response = requests.get(url, auth=confluence_auth)
+    response.raise_for_status()
+    return response.json()["results"]
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+        content_vector = generate_content_vector(content)
+
+        document = {
+            "page_id": page_id,
+            "title": title,
+            "content": content,
+            "last_modified": last_modified,
+            "content_vector": Vector(value=content_vector)
+        }
+
+        if event.webhookEvent == "page_created":
+            logging.info(f"Creating new document for page ID: {page_id}")
+            search_client.upload_documents(documents=[document])
+        elif event.webhookEvent == "page_updated":
+            logging.info(f"Updating document for page ID: {page_id}")
+            existing_doc = search_client.get_document(key=page_id)
+            if existing_doc and existing_doc["last_modified"] < last_modified:
+                search_client.merge_or_upload_documents(documents=[document])
+        elif event.webhookEvent == "page_deleted":
+            logging.info(f"Deleting document for page ID: {page_id}")
+            search_client.delete_documents(documents=[{"page_id": page_id}])
+        elif event.webhookEvent in ["page_moved", "page_renamed"]:
+            logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+            search_client.merge_or_upload_documents(documents=[document])
+        else:
+            logging.warning(f"Unsupported event type: {event.webhookEvent}")
+            raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/index_space/{space_key}")
+async def index_space(space_key: str):
+    try:
+        pages = fetch_pages_from_space(space_key)
+        documents = []
+        for page in pages:
+            page_id = page["id"]
+            title = page["title"]
+            content = page["body"]["storage"]["value"]
+            last_modified = page["version"]["when"]
+            content_vector = generate_content_vector(content)
+
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+            documents.append(document)
+
+        search_client.upload_documents(documents=documents)
+        return {"status": "success", "indexed_pages": len(documents)}
+    except Exception as e:
+        logging.error(f"Error indexing space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_space/{space_key}")
+async def delete_space(space_key: str):
+    try:
+        pages = fetch_pages_from_space(space_key)
+        page_ids = [{"page_id": page["id"]} for page in pages]
+
+        if page_ids:
+            search_client.delete_documents(documents=page_ids)
+            logging.info(f"Deleted {len(page_ids)} documents for space: {space_key}")
+            return {"status": "success", "deleted_pages": len(page_ids)}
+        else:
+            logging.info(f"No pages found for space: {space_key}")
+            return {"status": "success", "deleted_pages": 0}
+    except Exception as e:
+        logging.error(f"Error deleting space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_page/{page_id}")
+async def delete_page(page_id: str):
+    try:
+        search_client.delete_documents(documents=[{"page_id": page_id}])
+        logging.info(f"Deleted document for page ID: {page_id}")
+        return {"status": "success", "deleted_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error deleting page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Explanation
+Vector Generation: Added a placeholder function generate_content_vector to generate a vector from the page content. Replace this with your actual vector generation logic.
+Fetch Pages from Space: Implemented fetch_pages_from_space to retrieve all pages from a specific Confluence space.
+Index Space Endpoint: Added a new FastAPI endpoint /index_space/{space_key} to index all pages from a specified Confluence space.
+Delete Space Endpoint: Added a new FastAPI endpoint /delete_space/{space_key} to delete all pages’ content for a specific space from the Azure Search index.
+Delete Page Endpoint: Added a new FastAPI endpoint /delete_page/{page_id} to delete specific page content using page_id from the Azure Search index.
+Document Structure: Updated the document structure to include the content_vector field.
+Handling Events: Modified the event handling logic to include the content_vector when creating or updating documents.
+This setup ensures that your FastAPI server can handle Confluence events, index pages from an entire space, delete all pages’ content for a specific space, and delete specific page content using page_id from the Azure Search index. Let me know if you need further customization or have any other questions!
+

@@ -1,0 +1,625 @@
+please break complete code into organised modular reusable package components where app.py will start the service application and will subsequently call package or component based on api endpoint requests
+Copilot
+Using
+the web
+Sent by Copilot:
+Sure! Let’s break down the code into organized, modular, and reusable package components. We’ll structure the project so that app.py will start the service application and call the appropriate package or component based on API endpoint requests.
+
+Project Structure
+Here’s a suggested project structure:
+
+ai-workflow/
+├── app.py
+├── auth/
+│   ├── __init__.py
+│   ├── auth.py
+│   ├── models.py
+│   └── utils.py
+├── confluence/
+│   ├── __init__.py
+│   ├── loader.py
+│   └── utils.py
+├── search/
+│   ├── __init__.py
+│   ├── client.py
+│   ├── models.py
+│   └── utils.py
+├── embeddings/
+│   ├── __init__.py
+│   └── azure_openai.py
+└── config.py
+
+app.py
+This file will start the FastAPI application and include the main routing.
+
+Python
+
+from fastapi import FastAPI
+from auth.auth import router as auth_router
+from confluence.loader import router as confluence_router
+from search.client import router as search_router
+
+app = FastAPI()
+
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(confluence_router, prefix="/confluence", tags=["confluence"])
+app.include_router(search_router, prefix="/search", tags=["search"])
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+config.py
+This file will contain configuration settings.
+
+Python
+
+SECRET_KEY = "your_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+SEARCH_SERVICE_ENDPOINT = "https://<your-search-service>.search.windows.net"
+ADMIN_KEY = "<your-admin-key>"
+INDEX_NAME = "confluence-index"
+
+CONFLUENCE_BASE_URL = "https://<your-confluence-instance>.atlassian.net/wiki/rest/api"
+CONFLUENCE_AUTH = ("<your-email>", "<your-api-token>")
+
+AZURE_OPENAI_ENDPOINT = "https://<your-openai-endpoint>.openai.azure.com/"
+AZURE_OPENAI_API_KEY = "<your-openai-api-key>"
+AI-generated code. Review and use carefully. More info on FAQ.
+auth/ Package
+auth/__init__.py
+Python
+
+from .auth import router
+AI-generated code. Review and use carefully. More info on FAQ.
+auth/auth.py
+This file will handle authentication endpoints.
+
+Python
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from datetime import timedelta
+from .models import Token, TokenData, User, UserInDB
+from .utils import authenticate_user, create_access_token, get_current_active_user
+
+router = APIRouter()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+@router.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+AI-generated code. Review and use carefully. More info on FAQ.
+auth/models.py
+This file will define the data models for authentication.
+
+Python
+
+from pydantic import BaseModel
+from typing import Optional
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class User(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+
+class UserInDB(User):
+    hashed_password: str
+AI-generated code. Review and use carefully. More info on FAQ.
+auth/utils.py
+This file will contain utility functions for authentication.
+
+Python
+
+from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta
+from .models import UserInDB, TokenData
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+fake_users_db = {
+    "johndoe": {
+        "username": "johndoe",
+        "full_name": "John Doe",
+        "email": "johndoe@example.com",
+        "hashed_password": pwd_context.hash("secret"),
+        "disabled": False,
+    }
+}
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def get_user(db, username: str):
+    if username in db:
+        user_dict = db[username]
+        return UserInDB(**user_dict)
+
+def authenticate_user(username: str, password: str):
+    user = get_user(fake_users_db, username)
+    if not user:
+        return False
+    if not verify_password(password, user.hashed_password):
+        return False
+    return user
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(fake_users_db, username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+async def get_current_active_user(current_user: UserInDB):
+    if current_user.disabled:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+AI-generated code. Review and use carefully. More info on FAQ.
+confluence/ Package
+confluence/__init__.py
+Python
+
+from .loader import router
+AI-generated code. Review and use carefully. More info on FAQ.
+confluence/loader.py
+This file will handle Confluence-related endpoints.
+
+Python
+
+from fastapi import APIRouter, Depends, HTTPException
+from .utils import fetch_pages_from_space, split_content
+from auth.utils import get_current_active_user
+from embeddings.azure_openai import embeddings
+from search.utils import upload_documents
+
+router = APIRouter()
+
+@router.post("/index_space/{space_key}")
+async def index_space(space_key: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        documents = fetch_pages_from_space(space_key)
+        indexed_documents = []
+        for doc in documents:
+            page_id = doc.metadata["id"]
+            title = doc.metadata["title"]
+            content = doc.page_content
+            last_modified = doc.metadata["version"]["when"]
+            content_chunks = split_content(content)
+
+            for chunk in content_chunks:
+                content_vector = embeddings.embed_query(chunk.page_content)
+                document = {
+                    "page_id": page_id,
+                    "title": title,
+                    "content": chunk.page_content,
+                    "last_modified": last_modified,
+                    "content_vector": Vector(value=content_vector)
+                }
+                indexed_documents.append(document)
+
+        upload_documents(indexed_documents)
+        return {"status": "success", "indexed_pages": len(indexed_documents)}
+    except Exception as e:
+        logging.error(f"Error indexing space: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+AI-generated code. Review and use carefully. More info on FAQ.
+confluence/utils.py
+This file will contain utility functions for Confluence operations.
+
+Python
+
+from langchain_community.document_loaders import ConfluenceLoader
+from config import CONFLUENCE_BASE_URL, CONFLUENCE_AUTH
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+def fetch_pages_from_space(space_key: str):
+    loader = ConfluenceLoader(
+        url=CONFLUENCE_BASE_URL,
+        username=CONFLUENCE_AUTH[0],
+        api_key=CONFLUENCE_AUTH[1]
+    )
+    documents = loader.load(space_key=space_key, include_attachments=True, limit=50)
+    return documents
+
+def split_content(content: str):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=8000,
+        chunk_overlap=200,
+        length_function=len
+    )
+    return text_splitter.create_documents([content])
+AI-generated code. Review and use carefully. More info on FAQ.
+search/ Package
+search/__init__.py
+Python
+
+from .client import router
+AI-generated code. Review and use carefully. More info on FAQ.
+search/client.py
+This file will handle search-related endpoints.
+
+Python
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from auth.utils import get_current_active_user
+from embeddings.azure_openai import embeddings
+from .utils import search_documents, update_document, delete_documents
+
+router = APIRouter()
+
+@router.get("/")
+async def search(query: str, current_user:
+AI-generated code. Review and use carefully. More info on FAQ.
+Learn more
+
+1
+
+github.com
+2
+
+github.com
+3
+
+github.com
+4
+
+github.com
+5
+
+github.com
+6
+
+github.com
+7
+
+github.com
+8
+
+github.com
+9
+
+github.com
+10
+
+github.com
+11
+
+github.com
+12
+
+github.com
+13
+
+github.com
+14
+
+github.com
+15
+
+github.com
+16
+
+github.com
+17
+
+github.com
+18
+
+github.com
+19
+
+github.com
++13 more
+You
+Sent by you:
+please continue  where you left off
+Copilot
+Using
+the web
+Sent by Copilot:
+Certainly! Let’s continue with the search/client.py file and then proceed with the remaining components.
+
+search/client.py
+This file will handle search-related endpoints.
+
+Python
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from auth.utils import get_current_active_user
+from embeddings.azure_openai import embeddings
+from .utils import search_documents, update_document, delete_documents
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain.llms import AzureOpenAI
+from config import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY
+
+router = APIRouter()
+
+# Azure OpenAI LLM setup
+llm = AzureOpenAI(
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_key=AZURE_OPENAI_API_KEY,
+    model="text-davinci-003"
+)
+
+@router.get("/")
+async def search(query: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        # Perform hybrid search
+        search_results = search_documents(query, embeddings)
+        
+        # Extract relevant documents
+        documents = [doc for doc in search_results]
+        
+        # Use LangChain prompt to generate a response
+        prompt_template = PromptTemplate(
+            input_variables=["query", "documents"],
+            template="Based on the following documents: {documents}, answer the query: {query}"
+        )
+        chain = LLMChain(llm=llm, prompt=prompt_template)
+        response = chain.run(query=query, documents=documents)
+        
+        return {"query": query, "response": response, "documents": documents}
+    except Exception as e:
+        logging.error(f"Error performing search: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update_page/{page_id}")
+async def update_page(page_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        update_document(page_id, embeddings)
+        return {"status": "success", "updated_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error updating page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete_page/{page_id}")
+async def delete_page(page_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        delete_documents([{"page_id": page_id}])
+        logging.info(f"Deleted document for page ID: {page_id}")
+        return {"status": "success", "deleted_page_id": page_id}
+    except Exception as e:
+        logging.error(f"Error deleting page: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+AI-generated code. Review and use carefully. More info on FAQ.
+search/utils.py
+This file will contain utility functions for search operations.
+
+Python
+
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+from config import SEARCH_SERVICE_ENDPOINT, ADMIN_KEY, INDEX_NAME
+
+search_client = SearchClient(endpoint=SEARCH_SERVICE_ENDPOINT, index_name=INDEX_NAME, credential=ADMIN_KEY)
+
+def search_documents(query: str, embeddings):
+    vector = embeddings.embed_query(query)
+    search_results = search_client.search(query, include_total_count=True, vector={"value": vector, "fields": ["content_vector"]})
+    return search_results
+
+def update_document(page_id: str, embeddings):
+    page_data = fetch_page_content(page_id)
+    title = page_data["title"]
+    content = page_data["body"]["storage"]["value"]
+    last_modified = page_data["version"]["when"]
+    content_chunks = split_content(content)
+
+    for chunk in content_chunks:
+        content_vector = embeddings.embed_query(chunk.page_content)
+        document = {
+            "page_id": page_id,
+            "title": title,
+            "content": chunk.page_content,
+            "last_modified": last_modified,
+            "content_vector": Vector(value=content_vector)
+        }
+
+        existing_doc = search_client.get_document(key=page_id)
+        if existing_doc:
+            search_client.merge_or_upload_documents(documents=[document])
+        else:
+            search_client.upload_documents(documents=[document])
+
+def delete_documents(documents):
+    search_client.delete_documents(documents=documents)
+AI-generated code. Review and use carefully. More info on FAQ.
+embeddings/ Package
+embeddings/__init__.py
+Python
+
+from .azure_openai import embeddings
+AI-generated code. Review and use carefully. More info on FAQ.
+embeddings/azure_openai.py
+This file will handle Azure OpenAI embeddings.
+
+Python
+
+from langchain_openai import AzureOpenAIEmbeddings
+from config import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY
+
+embeddings = AzureOpenAIEmbeddings(
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_key=AZURE_OPENAI_API_KEY,
+    model="text-embedding-ada-002"
+)
+AI-generated code. Review and use carefully. More info on FAQ.
+Final Project Structure
+ai-workflow/
+├── app.py
+├── auth/
+│   ├── __init__.py
+│   ├── auth.py
+│   ├── models.py
+│   └── utils.py
+├── confluence/
+│   ├── __init__.py
+│   ├── loader.py
+│   └── utils.py
+├── search/
+│   ├── __init__.py
+│   ├── client.py
+│   ├── models.py
+│   └── utils.py
+├── embeddings/
+│   ├── __init__.py
+│   └── azure_openai.py
+└── config.py
+
+This modular structure ensures that each component is organized and reusable. The app.py file starts the FastAPI application and includes the routers for authentication, Confluence operations, and search functionalities. Each package contains the necessary files to handle specific tasks, making the codebase clean and maintainable. Let me know if you need any further customization or have any other questions!
+
+
+What if I want to add more components later?
+Copilot
+Using
+the web
+Sent by Copilot:
+Great question! The modular structure we’ve set up makes it easy to add more components in the future. Here’s how you can do it:
+
+Adding New Components
+Create a New Package:
+For each new component, create a new directory (package) under the main project directory.
+For example, if you want to add a component for handling notifications, you could create a notifications package.
+Define the Package Structure:
+Inside the new package, create the necessary files such as __init__.py, models.py, utils.py, and any other files needed for the component.
+Example structure for a notifications package:
+notifications/
+├── __init__.py
+├── models.py
+├── utils.py
+└── notifications.py
+
+Implement the Component Logic:
+Implement the logic for the new component in the respective files.
+For example, notifications.py could contain the FastAPI endpoints and business logic for handling notifications.
+Register the Router in app.py:
+Import the router from the new package and include it in the FastAPI application.
+Example:
+Python
+
+from notifications.notifications import router as notifications_router
+
+app.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
+AI-generated code. Review and use carefully. More info on FAQ.
+Example: Adding a Notifications Component
+notifications/__init__.py
+Python
+
+from .notifications import router
+AI-generated code. Review and use carefully. More info on FAQ.
+notifications/models.py
+Define the data models for notifications.
+
+Python
+
+from pydantic import BaseModel
+
+class Notification(BaseModel):
+    id: int
+    message: str
+    recipient: str
+    timestamp: str
+AI-generated code. Review and use carefully. More info on FAQ.
+notifications/utils.py
+Utility functions for notifications.
+
+Python
+
+def send_notification(notification):
+    # Logic to send notification
+    pass
+AI-generated code. Review and use carefully. More info on FAQ.
+notifications/notifications.py
+FastAPI endpoints for notifications.
+
+Python
+
+from fastapi import APIRouter, HTTPException
+from .models import Notification
+from .utils import send_notification
+
+router = APIRouter()
+
+@router.post("/")
+async def create_notification(notification: Notification):
+    try:
+        send_notification(notification)
+        return {"status": "success", "notification": notification}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+AI-generated code. Review and use carefully. More info on FAQ.
+Updating app.py
+Include the new router in the FastAPI application.
+
+Python
+
+from fastapi import FastAPI
+from auth.auth import router as auth_router
+from confluence.loader import router as confluence_router
+from search.client import router as search_router
+from notifications.notifications import router as notifications_router
+
+app = FastAPI()
+
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(confluence_router, prefix="/confluence", tags=["confluence"])
+app.include_router(search_router, prefix="/search", tags=["search"])
+app.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Summary
+By following this approach, you can easily add new components to your project. Each component will be self-contained, making the codebase more maintainable and scalable. If you have any specific components in mind or need further assistance, feel free to ask!

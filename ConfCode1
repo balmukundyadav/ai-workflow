@@ -1,0 +1,227 @@
+Steps to Configure Webhooks at the Space Level
+Access Webhook Configuration:
+Navigate to Administration > General Configuration > Webhooks in your Confluence instance.
+Create a New Webhook:
+Click on Create a Webhook.
+Enter a title for your webhook.
+Enter the URL of your FastAPI endpoint (e.g., https://your-domain.com/webhook).
+Optionally, enter a secret for security purposes.
+Select Events:
+Choose the events that should trigger the webhook. You can select events such as page_created, page_updated, page_deleted, page_moved, and page_renamed.
+Filter by Space:
+To filter events by a specific space, you can use the space_key parameter in the webhook payload. This ensures that only events from the specified space trigger the webhook.
+Test the Connection:
+Click on Test connection to ensure that Confluence can reach your FastAPI endpoint.
+Activate the Webhook:
+Select Active to make your webhook available immediately.
+Click Create to save the webhook.
+Example Webhook Payload
+Here’s an example of a webhook payload that includes the space_key:
+
+JSON
+
+{
+  "webhookEvent": "page_created",
+  "id": "12345",
+  "title": "New Page",
+  "body": {
+    "storage": {
+      "value": "<p>Page content</p>"
+    }
+  },
+  "version": {
+    "when": "2024-10-19T09:00:00Z"
+  },
+  "space": {
+    "key": "SPACE_KEY"
+  }
+}
+AI-generated code. Review and use carefully. More info on FAQ.
+FastAPI Endpoint to Handle Space-Specific Events
+Here’s how you can modify your FastAPI endpoint to handle events for a specific space:
+
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from azure.search.documents import SearchClient
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+class ConfluenceEvent(BaseModel):
+    webhookEvent: str
+    id: str
+    title: str
+    body: dict
+    version: dict
+    space: dict
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+
+        if space_key == "YOUR_SPACE_KEY":
+            if event.webhookEvent == "page_created":
+                logging.info(f"Creating new document for page ID: {page_id}")
+                search_client.upload_documents([{
+                    "page_id": page_id,
+                    "title": title,
+                    "content": content,
+                    "last_modified": last_modified
+                }])
+            elif event.webhookEvent == "page_updated":
+                logging.info(f"Updating document for page ID: {page_id}")
+                existing_doc = search_client.get_document(key=page_id)
+                if existing_doc and existing_doc["last_modified"] < last_modified:
+                    search_client.merge_or_upload_documents([{
+                        "page_id": page_id,
+                        "title": title,
+                        "content": content,
+                        "last_modified": last_modified
+                    }])
+            elif event.webhookEvent == "page_deleted":
+                logging.info(f"Deleting document for page ID: {page_id}")
+                search_client.delete_documents([{"page_id": page_id}])
+            elif event.webhookEvent in ["page_moved", "page_renamed"]:
+                logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+                search_client.merge_or_upload_documents([{
+                    "page_id": page_id,
+                    "title": title,
+                    "content": content,
+                    "last_modified": last_modified
+                }])
+            else:
+                logging.warning(f"Unsupported event type: {event.webhookEvent}")
+                raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Explanation
+Webhook Configuration: Set up the webhook in Confluence to send events for a specific space.
+FastAPI Endpoint: Modify the FastAPI endpoint to handle events based on the space_key.
+Logging: Implement logging to monitor incoming webhook events and processing steps.
+Azure Search Integration: Update the Azure Search index based on the received events.
+This setup ensures that your FastAPI server can handle space-specific events and update the Azure Search index accordingly. Let me know if you need further customization or have any other questions!
+
+
+
+===================================================
+Please rewrite above code if my search index also have content_vector field which is created to store vector of page content
+Copilot
+Using
+the web
+Sent by Copilot:
+Sure! If your search index includes a content_vector field to store the vector representation of the page content, you’ll need to update the FastAPI endpoint to handle this field. Here’s how you can modify the code:
+
+Updated FastAPI Endpoint
+Python
+
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='webhook.log', filemode='a',
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+app = FastAPI()
+
+# Azure Search setup
+search_service_endpoint = "https://<your-search-service>.search.windows.net"
+admin_key = "<your-admin-key>"
+index_name = "confluence-index"
+search_client = SearchClient(endpoint=search_service_endpoint, index_name=index_name, credential=admin_key)
+
+class ConfluenceEvent(BaseModel):
+    webhookEvent: str
+    id: str
+    title: str
+    body: dict
+    version: dict
+    space: dict
+
+def generate_content_vector(content: str) -> list:
+    # Placeholder function to generate a vector from content
+    # Replace this with your actual vector generation logic
+    return [0.0] * 300  # Example: 300-dimensional zero vector
+
+@app.post("/webhook")
+async def confluence_webhook(event: ConfluenceEvent):
+    logging.info(f"Received webhook event: {event.webhookEvent} for page ID: {event.id} in space: {event.space['key']}")
+    
+    try:
+        page_id = event.id
+        title = event.title
+        content = event.body["storage"]["value"]
+        last_modified = event.version["when"]
+        space_key = event.space["key"]
+        content_vector = generate_content_vector(content)
+
+        if space_key == "YOUR_SPACE_KEY":
+            document = {
+                "page_id": page_id,
+                "title": title,
+                "content": content,
+                "last_modified": last_modified,
+                "content_vector": Vector(value=content_vector)
+            }
+
+            if event.webhookEvent == "page_created":
+                logging.info(f"Creating new document for page ID: {page_id}")
+                search_client.upload_documents(documents=[document])
+            elif event.webhookEvent == "page_updated":
+                logging.info(f"Updating document for page ID: {page_id}")
+                existing_doc = search_client.get_document(key=page_id)
+                if existing_doc and existing_doc["last_modified"] < last_modified:
+                    search_client.merge_or_upload_documents(documents=[document])
+            elif event.webhookEvent == "page_deleted":
+                logging.info(f"Deleting document for page ID: {page_id}")
+                search_client.delete_documents(documents=[{"page_id": page_id}])
+            elif event.webhookEvent in ["page_moved", "page_renamed"]:
+                logging.info(f"Updating document for moved/renamed page ID: {page_id}")
+                search_client.merge_or_upload_documents(documents=[document])
+            else:
+                logging.warning(f"Unsupported event type: {event.webhookEvent}")
+                raise HTTPException(status_code=400, detail="Unsupported event type")
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+AI-generated code. Review and use carefully. More info on FAQ.
+Explanation
+Vector Generation: Added a placeholder function generate_content_vector to generate a vector from the page content. Replace this with your actual vector generation logic.
+Document Structure: Updated the document structure to include the content_vector field.
+Handling Events: Modified the event handling logic to include the content_vector when creating or updating documents.
+This setup ensures that your FastAPI server can handle Confluence events and update the Azure Search index with the content_vector field. Let me know if you need further customization or have any other questions!
