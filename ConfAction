@@ -1,0 +1,82 @@
+Absolutely, let's create a complete application using GPT Actions to fetch information from Confluence wiki for user queries. This example will involve setting up FastAPI, integrating with Confluence, using GPT for routing queries, and fetching relevant data.
+
+### Step-by-Step Guide:
+
+1. *Set up FastAPI*: For building the API endpoints.
+2. *Integrate Confluence*: Load and search Confluence pages.
+3. *Use GPT for Routing*: Decide which Confluence index to query based on user input.
+4. *Fetch and Return Data*: Retrieve data from Confluence and present it to the user.
+
+### Complete Code Example
+
+*Filename*: confluence_search_app.py
+
+python
+from fastapi import FastAPI, HTTPException
+import requests
+import openai
+
+app = FastAPI()
+
+# Configuration for Confluence and OpenAI
+CONFLUENCE_BASE_URL = "https://your_confluence_instance.atlassian.net/wiki"
+CONFLUENCE_API_TOKEN = "your_confluence_api_token"
+CONFLUENCE_USER_EMAIL = "your_confluence_user_email"
+
+OPENAI_API_KEY = "your_openai_api_key"
+openai.api_key = OPENAI_API_KEY
+
+# Confluence space indexes (example)
+CONFLUENCE_INDEXES = {
+    "index1": "space1",
+    "index2": "space2",
+    "index3": "space3",
+}
+
+# Function to query Confluence
+def query_confluence(space_key, query):
+    url = f"{CONFLUENCE_BASE_URL}/rest/api/space/{space_key}/content/search"
+    params = {"cql": f"text ~ '{query}'"}
+    auth = (CONFLUENCE_USER_EMAIL, CONFLUENCE_API_TOKEN)
+    response = requests.get(url, params=params, auth=auth)
+    response.raise_for_status()
+    return response.json()
+
+# Function to use GPT to decide the index
+def decide_index(query):
+    prompt = f"Based on the following user query, which Confluence space (index1, index2, index3) should be queried: {query}?"
+    response = openai.Completion.create(
+        model="text-davinci-003",
+        prompt=prompt,
+        max_tokens=10
+    )
+    index = response.choices[0].text.strip()
+    if index not in CONFLUENCE_INDEXES:
+        raise ValueError("Invalid index returned by GPT")
+    return index
+
+@app.post("/search")
+def search_confluence(query: str):
+    try:
+        index = decide_index(query)
+        space_key = CONFLUENCE_INDEXES[index]
+        results = query_confluence(space_key, query)
+        return {"index": index, "results": results}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="An error occurred while processing your request")
+
+# Run the application
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+### Breakdown:
+1. *FastAPI Setup*: Initializes the API with endpoints.
+2. *Confluence Integration*: Uses Confluence API to search specific spaces.
+3. *GPT Decision Making*: GPT-3 (or similar) decides which Confluence space to query based on the user’s input.
+4. *Query Execution*: Retrieves the relevant data from Confluence and returns it.
+
+This way, user queries are smartly routed and processed, leveraging both GPT’s capabilities and Confluence’s powerful search functionality. Ready to implement this?
