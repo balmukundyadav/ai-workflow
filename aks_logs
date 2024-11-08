@@ -1,0 +1,63 @@
+import os
+from azure.identity import DefaultAzureCredential
+from azure.mgmt.monitor import MonitorManagementClient
+from azure.mgmt.monitor.models import LogProfile
+from azure.loganalytics import LogAnalyticsDataClient
+from azure.loganalytics.models import QueryBody
+
+# Replace with your Azure details
+subscription_id = 'your-subscription-id'  # Replace with your Azure subscription ID
+resource_group_name = 'your-resource-group'  # Replace with your resource group
+workspace_name = 'your-log-analytics-workspace'  # Replace with your Log Analytics workspace name
+
+# Authenticate to Azure using DefaultAzureCredential (which uses az login)
+credential = DefaultAzureCredential()
+
+# Initialize Log Analytics client
+client = LogAnalyticsDataClient(credential)
+
+# Define the KQL query to get logs for your Kubernetes job
+def get_k8s_logs_from_workspace(job_name, namespace='default'):
+    """
+    Retrieve logs for a specific Kubernetes Job from Azure Monitor's Log Analytics workspace.
+    """
+    try:
+        # Define the KQL query (Azure Monitor logs for Kubernetes Jobs)
+        kql_query = f"""
+        ContainerLog
+        | where ClusterName == "your-cluster-name" 
+        | where Name == "{job_name}" and Namespace == "{namespace}"
+        | project TimeGenerated, ContainerID, LogEntry
+        | order by TimeGenerated desc
+        """
+        
+        # Define the query body
+        query_body = QueryBody(query=kql_query)
+
+        # Query the Log Analytics workspace
+        response = client.query_workspace(
+            workspace_id=f"/subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.OperationalInsights/workspaces/{workspace_name}",
+            query_body=query_body
+        )
+
+        # Check if there are any results
+        if response.tables:
+            # Process the query result
+            for row in response.tables[0].rows:
+                time_generated = row[0]
+                container_id = row[1]
+                log_entry = row[2]
+                print(f"Time: {time_generated}, ContainerID: {container_id}, Log: {log_entry}")
+        else:
+            print(f"No logs found for job: {job_name} in namespace: {namespace}")
+
+    except Exception as e:
+        print(f"Error querying logs: {e}")
+
+if __name__ == "__main__":
+    # Specify the Kubernetes job name to query logs for
+    job_name = 'your-job-name'  # Replace with your job name
+    namespace = 'default'  # Replace with the namespace of your job if needed
+
+    # Get logs for the specified job from the Log Analytics workspace
+    get_k8s_logs_from_workspace(job_name, namespace)
