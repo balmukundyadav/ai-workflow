@@ -1,0 +1,200 @@
+import logging
+import os
+from botbuilder.core import ActivityHandler, ConversationState, UserState, MessageFactory
+from botbuilder.core.integration import BotFrameworkAdapter, BotFrameworkAdapterSettings
+from flask import Flask, request, jsonify
+from botbuilder.schema import Activity
+import openai
+from dotenv import load_dotenv
+
+# Load environment variables from a .env file
+load_dotenv()
+
+# Configuration variables
+MICROSOFT_APP_ID = os.getenv("MICROSOFT_APP_ID", "")
+MICROSOFT_APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")  # or "gpt-4" for GPT-4
+
+# Set OpenAI API key
+openai.api_key = OPENAI_API_KEY
+
+# Create the Flask application
+app = Flask(__name__)
+
+# Bot Configuration
+adapter_settings = BotFrameworkAdapterSettings(MICROSOFT_APP_ID, MICROSOFT_APP_PASSWORD)
+adapter = BotFrameworkAdapter(adapter_settings)
+
+# Initialize Conversation and User State (Memory or Storage)
+conversation_state = ConversationState(memory_storage)
+user_state = UserState(memory_storage)
+
+# Define the Bot using OpenAI's GPT for conversation
+class MyBot(ActivityHandler):
+    def __init__(self):
+        pass
+
+    async def on_message_activity(self, turn_context):
+        user_input = turn_context.activity.text.strip()
+        logging.info(f"User said: {user_input}")
+        
+        # Call the LLM (OpenAI GPT) API to get the response
+        response = await self.get_llm_response(user_input)
+
+        # Send the response back to the user
+        await turn_context.send_activity(response)
+
+    async def get_llm_response(self, user_input: str) -> str:
+        """
+        Function to query OpenAI's GPT model and return the response.
+        """
+        try:
+            # Make the API call to OpenAI's GPT model
+            response = openai.ChatCompletion.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": user_input}
+                ],
+                max_tokens=150,  # Adjust the max tokens as per your need
+                temperature=0.7,  # Set creativity level
+            )
+            # Extract the response message
+            message = response['choices'][0]['message']['content'].strip()
+            return message
+        except Exception as e:
+            logging.error(f"Error with OpenAI API: {str(e)}")
+            return "Sorry, I couldn't process your request at the moment."
+
+# Instantiate the bot
+my_bot = MyBot()
+
+# Set up the route for incoming messages
+@app.route("/api/messages", methods=["POST"])
+async def messages():
+    body = await request.json
+    activity = Activity().deserialize(body)
+    auth_header = request.headers["Authorization"] if "Authorization" in request.headers else None
+    response = await adapter.process_activity(activity, auth_header, my_bot.on_turn)
+    if response:
+        return jsonify(response.body)
+    return "", 202
+
+if __name__ == "__main__":
+    # Run the Flask app
+    app.run(debug=True, port=3978)
+
+========================================================
+Sure! Here’s a basic example of how you can create a conversational chatbot using Python with the Microsoft Bot Framework and integrate it with your LLM application:
+
+Step 1: Set Up Your Environment
+Install Required Libraries:
+
+python
+pip install botbuilder-core botbuilder-ai botbuilder-integration-aiohttp
+Step 2: Create Your Bot
+Create a New Python File (e.g., app.py):
+
+python
+from aiohttp import web
+from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
+from botbuilder.schema import Activity
+
+class MyBot:
+    async def on_turn(self, turn_context: TurnContext):
+        if turn_context.activity.type == "message":
+            await turn_context.send_activity(f"You said: {turn_context.activity.text}")
+
+app = web.Application()
+bot_settings = BotFrameworkAdapterSettings("YOUR_APP_ID", "YOUR_APP_PASSWORD")
+adapter = BotFrameworkAdapter(bot_settings)
+bot = MyBot()
+
+async def messages(req):
+    body = await req.json()
+    activity = Activity().deserialize(body)
+    auth_header = req.headers["Authorization"] if "Authorization" in req.headers else ""
+    response = await adapter.process_activity(activity, auth_header, bot.on_turn)
+    return web.Response(status=response.status)
+
+app.router.add_post("/api/messages", messages)
+
+if __name__ == "__main__":
+    web.run_app(app, host="localhost", port=3978)
+Step 3: Connect to the Bot Using Bot Framework Emulator
+Launch Bot Framework Emulator:
+
+Download and install the Bot Framework Emulator from the GitHub releases page.
+
+Open the Bot Framework Emulator.
+
+Select File, then Open Bot.
+
+Enter a Bot URL of http://localhost:3978/api/messages and press Connect.
+
+Step 4: Integrate Your LLM Application
+Modify the on_turn Method to call your LLM application:
+
+python
+import openai
+
+class MyBot:
+    async def on_turn(self, turn_context: TurnContext):
+        if turn_context.activity.type == "message":
+            response = self.call_llm(turn_context.activity.text)
+            await turn_context.send_activity(response)
+
+    def call_llm(self, user_input):
+        openai.api_key = "YOUR_OPENAI_API_KEY"
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=user_input,
+            max_tokens=150
+        )
+        return response.choices[0].text.strip()
+Step 5: Test and Debug Your Bot
+Test Your Bot:
+
+Use the Bot Framework Emulator to test bots running either locally on your machine or connect to bots running remotely through a tunnel.
+
+Debug and refine your bot as needed.
+
+By following these steps, you should be able to create a conversational chatbot using Python, integrate it with your LLM application, and test it using the Microsoft Bot Framework Emulator. Happy coding!
+
+do I need to provide "YOUR_APP_ID", "YOUR_APP_PASSWORD" if running locally?
+When running your bot locally using the Bot Framework Emulator, you don't necessarily need to provide YOUR_APP_ID and YOUR_APP_PASSWORD. These are primarily required for authentication when your bot is deployed to a cloud service like Azure.
+
+For local development and testing, you can set these values to empty strings or omit them entirely. Here's how you can modify the code:
+
+python
+from aiohttp import web
+from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
+from botbuilder.schema import Activity
+
+class MyBot:
+    async def on_turn(self, turn_context: TurnContext):
+        if turn_context.activity.type == "message":
+            await turn_context.send_activity(f"You said: {turn_context.activity.text}")
+
+app = web.Application()
+# Set app_id and app_password to empty strings for local development
+bot_settings = BotFrameworkAdapterSettings("", "")
+adapter = BotFrameworkAdapter(bot_settings)
+bot = MyBot()
+
+async def messages(req):
+    body = await req.json()
+    activity = Activity().deserialize(body)
+    auth_header = req.headers["Authorization"] if "Authorization" in req.headers else ""
+    response = await adapter.process_activity(activity, auth_header, bot.on_turn)
+    return web.Response(status=response.status)
+
+app.router.add_post("/api/messages", messages)
+
+if __name__ == "__main__":
+    web.run_app(app, host="localhost", port=3978)
+This way, you can run and test your bot locally without needing to set up authentication credentials. Once you're ready to deploy your bot to a cloud service, you can update the app_id and app_password with the appropriate values.
+
+
+
