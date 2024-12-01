@@ -152,3 +152,104 @@ Notes:
 Ensure that you replace placeholders like PRIVATE_TOKEN and PROJECT_ID with actual values for your GitLab repository.
 The retrieval-based QA (RAG) pipeline can be customized with different models or embeddings.
 This code is using Chroma as the vector store, but you can also use FAISS if you prefer.
+
+
+import os
+import subprocess
+import requests
+
+def clone_gitlab_repo(gitlab_url, personal_access_token, project_id, destination_path):
+    """
+    Clones a GitLab project repository using the API to fetch the repository URL.
+
+    :param gitlab_url: Base URL of the GitLab instance (e.g., 'https://gitlab.com').
+    :param personal_access_token: Your GitLab personal access token.
+    :param project_id: ID or path of the GitLab project.
+    :param destination_path: Path to clone the repository into.
+    """
+    headers = {
+        "Authorization": f"Bearer {personal_access_token}"
+    }
+    api_url = f"{gitlab_url}/api/v4/projects/{project_id}"
+
+    try:
+        # Get the project details
+        response = requests.get(api_url, headers=headers)
+        response.raise_for_status()
+        project_data = response.json()
+
+        # Get the HTTPS clone URL
+        clone_url = project_data.get("http_url_to_repo")
+        if not clone_url:
+            raise ValueError("Unable to retrieve the repository URL.")
+
+        # Clone the repository using `git`
+        print(f"Cloning repository from {clone_url} into {destination_path}...")
+        subprocess.run(["git", "clone", clone_url, destination_path], check=True)
+        print("Repository cloned successfully.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error accessing GitLab API: {e}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error while cloning repository: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+# Example usage
+if __name__ == "__main__":
+    # Replace these with your GitLab details
+    GITLAB_URL = "https://gitlab.com"
+    PERSONAL_ACCESS_TOKEN = "your_personal_access_token"
+    PROJECT_ID = "your_project_id_or_path"  # e.g., "username/project-name" or project numeric ID
+    DESTINATION_PATH = "path_to_clone_repo"
+
+    clone_gitlab_repo(GITLAB_URL, PERSONAL_ACCESS_TOKEN, PROJECT_ID, DESTINATION_PATH)
+
+
+
+import os
+import requests
+
+def download_gitlab_repo_archive(gitlab_url, personal_access_token, project_id, destination_path):
+    """
+    Downloads a GitLab project repository archive using the API.
+
+    :param gitlab_url: Base URL of the GitLab instance (e.g., 'https://gitlab.com').
+    :param personal_access_token: Your GitLab personal access token.
+    :param project_id: ID or path of the GitLab project.
+    :param destination_path: Path to save the downloaded archive.
+    """
+    headers = {
+        "Authorization": f"Bearer {personal_access_token}"
+    }
+    api_url = f"{gitlab_url}/api/v4/projects/{project_id}/repository/archive"
+
+    try:
+        # Send the GET request to download the archive
+        print(f"Downloading repository archive from {api_url}...")
+        response = requests.get(api_url, headers=headers, stream=True)
+        response.raise_for_status()
+
+        # Save the archive to the specified path
+        with open(destination_path, "wb") as archive_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                archive_file.write(chunk)
+
+        print(f"Repository archive saved to {destination_path}.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error accessing GitLab API: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+# Example usage
+if __name__ == "__main__":
+    # Replace these with your GitLab details
+    GITLAB_URL = "https://gitlab.com"
+    PERSONAL_ACCESS_TOKEN = "your_personal_access_token"
+    PROJECT_ID = "your_project_id_or_path"  # e.g., "username/project-name" or project numeric ID
+    DESTINATION_PATH = "path_to_save_archive.zip"
+
+    download_gitlab_repo_archive(GITLAB_URL, PERSONAL_ACCESS_TOKEN, PROJECT_ID, DESTINATION_PATH)
