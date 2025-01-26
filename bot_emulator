@@ -1,3 +1,26 @@
+        <div class="icon">
+			<svg xmlns="http://www.w3.org/2000/svg" width="70" height="70" viewBox="0 0 24 24">
+			  <circle cx="12" cy="8" r="5" fill="#4CAF50" />
+			  <path d="M12 15c-4 0-7 3-7 7h14c0-4-3-7-7-7z" fill="#4CAF50" />
+			</svg>
+
+        </div>
+
+        <!-- AI Icon (Robot) -->
+        <div class="icon">
+			<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24">
+			  <rect x="4" y="4" width="16" height="16" rx="2" ry="2" fill="#2196F3" />
+			  <circle cx="8" cy="10" r="1.5" fill="#fff"/>
+			  <circle cx="16" cy="10" r="1.5" fill="#fff"/>
+			  <path d="M8 16h8" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+			</svg>
+
+
+
+
+
+
+
 import logging
 import os
 from botbuilder.core import ActivityHandler, ConversationState, UserState, MessageFactory
