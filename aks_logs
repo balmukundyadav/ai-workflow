@@ -1,3 +1,29 @@
+import streamlit as st
+import requests
+
+def check_server_status(url):
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return "🟢 Server is running"
+        else:
+            return f"🟠 Server returned status code: {response.status_code}"
+    except requests.exceptions.RequestException:
+        return "🔴 Server is down or unreachable"
+
+st.title("Server Status Checker")
+
+server_url = st.text_input("Enter the server URL (e.g., https://example.com):")
+
+if st.button("Check Server Status"):
+    if server_url:
+        status = check_server_status(server_url)
+        st.write(status)
+    else:
+        st.warning("Please enter a valid server URL!")
+
+
+
 import os
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.monitor import MonitorManagementClient
