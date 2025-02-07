@@ -1,3 +1,58 @@
+import streamlit as st
+import openai
+
+# OpenAI API Key (Replace with your actual API key)
+OPENAI_API_KEY = "your_openai_api_key"
+
+# Initialize session state for chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Streamed LLM response generator
+def generate_response(prompt):
+    response = openai.ChatCompletion.create(
+        model="gpt-4o",  # Change model if needed
+        messages=[{"role": "user", "content": prompt}],
+        stream=True,
+        api_key=OPENAI_API_KEY,
+    )
+
+    for chunk in response:
+        if "content" in chunk["choices"][0]["delta"]:
+            yield chunk["choices"][0]["delta"]["content"]
+
+# Streamlit UI Layout
+st.title("💬 Live Chat with LLM")
+st.markdown("Ask me anything and get real-time responses!")
+
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# User input
+if prompt := st.chat_input("Type your question..."):
+    # Append user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Display user message in UI
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Stream LLM response
+    with st.chat_message("assistant"):
+        response_stream = st.empty()
+        full_response = ""
+        for chunk in generate_response(prompt):
+            full_response += chunk
+            response_stream.markdown(full_response + "▌")
+
+    # Append assistant message to chat history
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+
+
+
 """
 You are an intelligent assistant designed to help users with queries related to the execution status and logs of the application.
 Your task is to provide the most relevant log information based on the user's query, such as execution status, success, failure, errors, or other related application events.
