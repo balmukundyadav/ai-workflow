@@ -1,3 +1,379 @@
+✅ 1. POST /build-index
+Creates a new Azure Search index with specified schema.
+
+🔗 Endpoint
+bash
+Copy
+Edit
+POST /build-index
+📄 Sample Payload
+json
+Copy
+Edit
+{
+  "name": "products-index",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "filterable": true },
+    { "name": "name", "type": "Edm.String", "searchable": true },
+    { "name": "description", "type": "Edm.String", "searchable": true },
+    { "name": "price", "type": "Edm.Double", "filterable": true, "sortable": true }
+  ]
+}
+✅ 2. POST /insert-data
+Inserts documents into an existing index.
+
+🔗 Endpoint
+bash
+Copy
+Edit
+POST /insert-data
+📄 Sample Payload
+json
+Copy
+Edit
+{
+  "index_name": "products-index",
+  "documents": [
+    {
+      "id": "1",
+      "name": "Wireless Mouse",
+      "description": "Ergonomic wireless mouse",
+      "price": 29.99
+    },
+    {
+      "id": "2",
+      "name": "Mechanical Keyboard",
+      "description": "RGB backlit mechanical keyboard",
+      "price": 89.99
+    }
+  ]
+}
+If you don’t pass "index_name", it uses the default from your .env.
+
+✅ 3. POST /search
+Searches the index with a text query.
+
+🔗 Endpoint
+bash
+Copy
+Edit
+POST /search
+📄 Sample Payload
+json
+Copy
+Edit
+{
+  "query": "wireless",
+  "index_name": "products-index",
+  "top": 3
+}
+Returns up to 3 search matches from the specified index.
+
+✅ 4. DELETE /delete-index/{index_name}
+Deletes a specific index from Azure Search.
+
+🔗 Endpoint
+pgsql
+Copy
+Edit
+DELETE /delete-index/products-index
+Just replace products-index with the index name you want to delete.
+
+Let me know if you'd like:
+
+Search filters/sorting examples
+
+Geo or AI-enriched index examples
+
+Upload these samples in Postman collection or Swagger format
+
+A GitHub-ready repo with this whole service setup
+
+
+1/2
+
+
+
+
+
+You said:
+please enhance the above mentioned points
+
+
+ChatGPT said:
+Great! Let’s enhance the service and examples to make your FastAPI + Azure Cognitive Search API more robust, realistic, and enterprise-ready.
+
+✅ Enhanced Endpoint Features + Sample Data
+🔹 1. POST /build-index – Enhanced Index Creation
+✅ Improvements:
+Support optional analyzers (e.g., for language-specific search)
+
+Define sortable, filterable, facetable, and retrievable fields
+
+📄 Enhanced Payload Example:
+json
+Copy
+Edit
+{
+  "name": "products-index",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "filterable": true, "sortable": true },
+    { "name": "name", "type": "Edm.String", "searchable": true, "sortable": true, "retrievable": true },
+    { "name": "description", "type": "Edm.String", "searchable": true, "retrievable": true },
+    { "name": "category", "type": "Edm.String", "searchable": true, "filterable": true, "facetable": true },
+    { "name": "price", "type": "Edm.Double", "filterable": true, "sortable": true, "retrievable": true },
+    { "name": "stock", "type": "Edm.Int32", "filterable": true, "sortable": true }
+  ]
+}
+🔹 2. POST /insert-data – Insert with Diverse Fields
+✅ Improvements:
+Supports optional @odata.type in documents
+
+Flexible indexing across various field types
+
+Handles bulk insert
+
+📄 Enhanced Payload Example:
+json
+Copy
+Edit
+{
+  "index_name": "products-index",
+  "documents": [
+    {
+      "id": "p001",
+      "name": "USB-C Charging Cable",
+      "description": "Durable nylon braided cable for fast charging.",
+      "category": "Accessories",
+      "price": 14.99,
+      "stock": 120
+    },
+    {
+      "id": "p002",
+      "name": "Gaming Laptop",
+      "description": "High-performance laptop for gaming and productivity.",
+      "category": "Electronics",
+      "price": 1299.99,
+      "stock": 10
+    }
+  ]
+}
+🔹 3. POST /search – Advanced Search Features
+✅ Improvements:
+Filter expressions (e.g., price gt 100)
+
+Sorting (orderby)
+
+Facets (e.g., by category)
+
+Highlights (highlighting matched terms)
+
+📄 Enhanced Payload Example:
+json
+Copy
+Edit
+{
+  "query": "laptop",
+  "index_name": "products-index",
+  "top": 5,
+  "filter": "price gt 500 and stock gt 5",
+  "orderby": "price desc",
+  "facets": ["category"]
+}
+You’ll need to update your SearchRequest model and search_documents function to support these fields (I'll help if needed).
+
+🔹 4. DELETE /delete-index/{index_name} – Confirmation Response
+✅ Improvements:
+Confirm deletion with a clear response message
+
+Optional soft-delete flag or audit logging (optional future)
+
+📄 Sample Request:
+pgsql
+Copy
+Edit
+DELETE /delete-index/products-index
+✔️ Sample Response:
+json
+Copy
+Edit
+{
+  "message": "Index 'products-index' successfully deleted"
+}
+🛠 Optional Enhancements to Add Next
+Feature	Description
+🔒 Auth	Add API key, JWT, or Azure AD auth
+🧠 Synonym Maps	Enhance search results with synonyms
+📈 Metrics	Add Prometheus/Grafana export or Azure Monitor hooks
+🧾 Audit Log	Log all operations to Azure Table or CosmosDB
+📤 Import from CSV/JSON	Upload a file to auto-ingest into index
+📄 Swagger Tags	Organize endpoints by purpose (build/search/insert/etc.)
+🧪 Postman Collection	For easier testing and collaboration
+🐳 Docker	Containerized deployment via Docker or Azure Container Apps
+🔁 Retry Logic	Handle transient Azure API errors with retry policies
+🔄 Async Support	Make all endpoints async-ready with retry/timeout logic
+
+Would you like me to:
+
+Generate an updated OpenAPI spec or Postman collection?
+
+Extend the codebase with filter, sort, facet, and highlight support?
+
+Package this as a ready-to-deploy GitHub repo with CI?
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchableField
+from azure.search.documents.models import QueryType
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI()
+
+AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
+AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
+DEFAULT_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX", "default-index")
+
+credential = AzureKeyCredential(AZURE_SEARCH_KEY)
+index_client = SearchIndexClient(endpoint=AZURE_SEARCH_ENDPOINT, credential=credential)
+
+class IndexField(BaseModel):
+    name: str
+    type: str
+    key: Optional[bool] = False
+    filterable: Optional[bool] = False
+    sortable: Optional[bool] = False
+    facetable: Optional[bool] = False
+    searchable: Optional[bool] = False
+    retrievable: Optional[bool] = True
+
+class CreateIndexRequest(BaseModel):
+    name: str
+    fields: List[IndexField]
+
+class InsertDataRequest(BaseModel):
+    index_name: Optional[str] = DEFAULT_INDEX_NAME
+    documents: List[dict]
+
+class SearchRequest(BaseModel):
+    query: str
+    index_name: Optional[str] = DEFAULT_INDEX_NAME
+    top: Optional[int] = 5
+    filter: Optional[str] = None
+    orderby: Optional[str] = None
+    facets: Optional[List[str]] = None
+    highlight_fields: Optional[List[str]] = None
+
+@app.post("/build-index")
+def build_index(request: CreateIndexRequest):
+    fields = []
+    for f in request.fields:
+        if f.searchable:
+            fields.append(SearchableField(
+                name=f.name,
+                type=f.type,
+                filterable=f.filterable,
+                sortable=f.sortable,
+                facetable=f.facetable,
+                retrievable=f.retrievable
+            ))
+        else:
+            fields.append(SimpleField(
+                name=f.name,
+                type=f.type,
+                key=f.key,
+                filterable=f.filterable,
+                sortable=f.sortable,
+                facetable=f.facetable,
+                retrievable=f.retrievable
+            ))
+
+    index = SearchIndex(name=request.name, fields=fields)
+    try:
+        result = index_client.create_index(index)
+        return {"message": f"Index '{request.name}' created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/insert-data")
+def insert_data(request: InsertDataRequest):
+    index_name = request.index_name or DEFAULT_INDEX_NAME
+    search_client = SearchClient(endpoint=AZURE_SEARCH_ENDPOINT, index_name=index_name, credential=credential)
+    try:
+        result = search_client.upload_documents(documents=request.documents)
+        return {"message": f"Inserted {len(request.documents)} documents into '{index_name}'", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/search")
+def search_documents(request: SearchRequest):
+    index_name = request.index_name or DEFAULT_INDEX_NAME
+    search_client = SearchClient(endpoint=AZURE_SEARCH_ENDPOINT, index_name=index_name, credential=credential)
+    try:
+        results = search_client.search(
+            search_text=request.query,
+            top=request.top,
+            filter=request.filter,
+            order_by=request.orderby,
+            facets=request.facets,
+            highlight_fields=request.highlight_fields,
+            query_type=QueryType.SIMPLE
+        )
+
+        output = []
+        for r in results:
+            item = r.copy()
+            if hasattr(r, "highlights"):
+                item["highlights"] = r.highlights
+            output.append(item)
+
+        return {"results": output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-index/{index_name}")
+def delete_index(index_name: str):
+    try:
+        index_client.delete_index(index_name=index_name)
+        return {"message": f"Index '{index_name}' successfully deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Skip to content
 Chat history
 
