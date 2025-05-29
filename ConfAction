@@ -1,3 +1,442 @@
+Skip to content
+Chat history
+
+You said:
+I would like to create fastapi service that will have four endpoints 
+first build index to create azure search index
+second to insert data to created index
+ChatGPT said:
+To create a FastAPI service with four endpoints for working with Azure Cognitive Search, we can start by implementing the first two:
+
+POST /build-index – Creates an Azure Search index.
+
+POST /insert-data – Inserts documents into the created index.
+
+We'll define a FastAPI app that uses Azure SDKs, and you’ll need your Azure Search service name, admin key, and optionally the index name and data schema.
+
+✅ Prerequisites
+Install the required libraries:
+
+pip install fastapi uvicorn azure-search-documents python-dotenv
+Add your Azure Search credentials to a .env file:
+
+AZURE_SEARCH_ENDPOINT=https://<your-search-service>.search.windows.net
+AZURE_SEARCH_API_KEY=<your-admin-key>
+AZURE_SEARCH_INDEX_NAME=my-index
+🧠 Basic Directory Structure
+fastapi_azure_search/
+├── main.py
+├── search_utils.py
+├── models.py
+└── .env
+📦 models.py – Pydantic schemas
+from pydantic import BaseModel
+from typing import List, Dict, Any
+
+class IndexSchema(BaseModel):
+    name: str
+    fields: List[Dict[str, Any]]  # Field definitions in Azure schema format
+
+class InsertDataRequest(BaseModel):
+    documents: List[Dict[str, Any]]
+🔧 search_utils.py – Azure Search helpers
+import os
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes.models import SearchIndex
+from dotenv import load_dotenv
+
+load_dotenv()
+
+endpoint = os.getenv("AZURE_SEARCH_ENDPOINT")
+api_key = os.getenv("AZURE_SEARCH_API_KEY")
+
+credential = AzureKeyCredential(api_key)
+
+def create_index(index_name: str, fields: list):
+    index_client = SearchIndexClient(endpoint=endpoint, credential=credential)
+    index = SearchIndex(name=index_name, fields=fields)
+    result = index_client.create_index(index)
+    return result
+
+def insert_documents(index_name: str, documents: list):
+    search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
+    result = search_client.upload_documents(documents)
+    return result
+🚀 main.py – FastAPI application
+from fastapi import FastAPI, HTTPException
+from models import IndexSchema, InsertDataRequest
+from search_utils import create_index, insert_documents
+
+app = FastAPI()
+
+@app.post("/build-index")
+def build_index(payload: IndexSchema):
+    try:
+        result = create_index(payload.name, payload.fields)
+        return {"message": "Index created", "index": result.name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/insert-data")
+def insert_data(payload: InsertDataRequest):
+    try:
+        index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
+        result = insert_documents(index_name, payload.documents)
+        return {"message": "Documents inserted", "status": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+✅ Running the FastAPI server
+uvicorn main:app --reload
+📌 Example Requests
+Create Index:
+
+POST /build-index
+
+{
+  "name": "my-index",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "filterable": true },
+    { "name": "title", "type": "Edm.String", "searchable": true },
+    { "name": "content", "type": "Edm.String", "searchable": true }
+  ]
+}
+Insert Documents:
+
+POST /insert-data
+
+{
+  "documents": [
+    { "id": "1", "title": "Test 1", "content": "This is a test document." },
+    { "id": "2", "title": "Test 2", "content": "Another document here." }
+  ]
+}
+Would you like to continue with the next two endpoints (e.g., search and delete)?
+
+You said:
+also i would like to add third endpoint to search the index by passing the query or search context and fourth endpoint to delete the specified search index from azure search
+ChatGPT said:
+Perfect! Let's extend your FastAPI service to include:
+
+POST /search – Search the Azure index using a query string or search context.
+
+DELETE /delete-index/{index_name} – Delete a specified Azure Search index.
+
+🛠️ Full Updated Implementation
+✅ Updated models.py
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+
+class IndexSchema(BaseModel):
+    name: str
+    fields: List[Dict[str, Any]]
+
+class InsertDataRequest(BaseModel):
+    documents: List[Dict[str, Any]]
+
+class SearchRequest(BaseModel):
+    query: str
+    index_name: Optional[str] = None
+    top: Optional[int] = 5  # Number of results to return
+✅ Updated search_utils.py
+import os
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes.models import SearchIndex
+from dotenv import load_dotenv
+
+load_dotenv()
+
+endpoint = os.getenv("AZURE_SEARCH_ENDPOINT")
+api_key = os.getenv("AZURE_SEARCH_API_KEY")
+
+credential = AzureKeyCredential(api_key)
+
+def create_index(index_name: str, fields: list):
+    index_client = SearchIndexClient(endpoint=endpoint, credential=credential)
+    index = SearchIndex(name=index_name, fields=fields)
+    return index_client.create_index(index)
+
+def insert_documents(index_name: str, documents: list):
+    search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
+    return search_client.upload_documents(documents)
+
+def search_documents(index_name: str, query: str, top: int = 5):
+    search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
+    results = search_client.search(query, top=top)
+    return [doc for doc in results]
+
+def delete_index(index_name: str):
+    index_client = SearchIndexClient(endpoint=endpoint, credential=credential)
+    index_client.delete_index(index_name)
+    return {"message": f"Index '{index_name}' deleted."}
+✅ Updated main.py
+from fastapi import FastAPI, HTTPException
+from models import IndexSchema, InsertDataRequest, SearchRequest
+from search_utils import create_index, insert_documents, search_documents, delete_index
+import os
+
+app = FastAPI()
+
+@app.post("/build-index")
+def build_index(payload: IndexSchema):
+    try:
+        result = create_index(payload.name, payload.fields)
+        return {"message": "Index created", "index": result.name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/insert-data")
+def insert_data(payload: InsertDataRequest):
+    try:
+        index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
+        result = insert_documents(index_name, payload.documents)
+        return {"message": "Documents inserted", "status": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/search")
+def search_index(payload: SearchRequest):
+    try:
+        index_name = payload.index_name or os.getenv("AZURE_SEARCH_INDEX_NAME")
+        results = search_documents(index_name=index_name, query=payload.query, top=payload.top)
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-index/{index_name}")
+def delete_search_index(index_name: str):
+    try:
+        result = delete_index(index_name)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+🧪 Example Usage
+🔍 POST /search
+{
+  "query": "test document",
+  "top": 3
+}
+🗑️ DELETE /delete-index/my-index
+DELETE /delete-index/my-index
+Would you like me to help you package this into a GitHub-ready project or a Docker container for deployment?
+
+You said:
+please create full flagged service that can be scalable 
+ChatGPT said:
+Updated saved memory
+Here's a scalable, production-ready FastAPI service for managing Azure Cognitive Search. It includes:
+
+✅ Four endpoints:
+
+POST /build-index – Create a search index
+
+POST /insert-data – Insert documents
+
+POST /search – Search the index
+
+DELETE /delete-index/{index_name} – Delete index
+
+✅ Production-Ready Features:
+
+Modular code structure
+
+Centralized logging
+
+.env config management
+
+Azure SDK integration
+
+Typed schemas with Pydantic
+
+Uvicorn-compatible for ASGI hosting
+
+Scalable with containers or Azure App Service
+
+📁 Project Structure
+azure_search_service/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── config.py
+│   ├── models.py
+│   ├── routes.py
+│   ├── azure_search.py
+│   └── logger.py
+├── .env
+├── requirements.txt
+└── run.sh
+🔧 Configuration – .env
+AZURE_SEARCH_ENDPOINT=https://<your-service>.search.windows.net
+AZURE_SEARCH_API_KEY=<your-admin-key>
+DEFAULT_INDEX_NAME=my-index
+📦 requirements.txt
+fastapi
+uvicorn
+azure-search-documents
+python-dotenv
+🧠 app/config.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Settings:
+    AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
+    AZURE_SEARCH_API_KEY = os.getenv("AZURE_SEARCH_API_KEY")
+    DEFAULT_INDEX_NAME = os.getenv("DEFAULT_INDEX_NAME", "default-index")
+
+settings = Settings()
+🧾 app/models.py
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+
+class IndexSchema(BaseModel):
+    name: str
+    fields: List[Dict[str, Any]]
+
+class InsertDataRequest(BaseModel):
+    documents: List[Dict[str, Any]]
+    index_name: Optional[str] = None
+
+class SearchRequest(BaseModel):
+    query: str
+    index_name: Optional[str] = None
+    top: Optional[int] = 5
+🔧 app/logger.py
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+🔍 app/azure_search.py
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import SearchIndex
+from azure.search.documents import SearchClient
+from app.config import settings
+from app.logger import logger
+
+credential = AzureKeyCredential(settings.AZURE_SEARCH_API_KEY)
+
+def get_index_client():
+    return SearchIndexClient(endpoint=settings.AZURE_SEARCH_ENDPOINT, credential=credential)
+
+def get_search_client(index_name):
+    return SearchClient(endpoint=settings.AZURE_SEARCH_ENDPOINT, index_name=index_name, credential=credential)
+
+def create_index(index_name: str, fields: list):
+    client = get_index_client()
+    index = SearchIndex(name=index_name, fields=fields)
+    logger.info(f"Creating index: {index_name}")
+    return client.create_index(index)
+
+def insert_documents(index_name: str, documents: list):
+    client = get_search_client(index_name)
+    logger.info(f"Inserting documents to index: {index_name}")
+    return client.upload_documents(documents)
+
+def search_documents(index_name: str, query: str, top: int = 5):
+    client = get_search_client(index_name)
+    logger.info(f"Searching index: {index_name} with query: {query}")
+    results = client.search(query, top=top)
+    return [doc for doc in results]
+
+def delete_index(index_name: str):
+    client = get_index_client()
+    logger.info(f"Deleting index: {index_name}")
+    client.delete_index(index_name)
+    return {"message": f"Index '{index_name}' deleted"}
+🌐 app/routes.py
+from fastapi import APIRouter, HTTPException
+from app.models import IndexSchema, InsertDataRequest, SearchRequest
+from app.azure_search import create_index, insert_documents, search_documents, delete_index
+from app.config import settings
+
+router = APIRouter()
+
+@router.post("/build-index")
+def build_index(payload: IndexSchema):
+    try:
+        result = create_index(payload.name, payload.fields)
+        return {"message": "Index created", "index": result.name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/insert-data")
+def insert_data(payload: InsertDataRequest):
+    try:
+        index_name = payload.index_name or settings.DEFAULT_INDEX_NAME
+        result = insert_documents(index_name, payload.documents)
+        return {"message": "Documents inserted", "status": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/search")
+def search_index(payload: SearchRequest):
+    try:
+        index_name = payload.index_name or settings.DEFAULT_INDEX_NAME
+        results = search_documents(index_name, payload.query, payload.top)
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete-index/{index_name}")
+def delete_search_index(index_name: str):
+    try:
+        return delete_index(index_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+🚀 app/main.py
+from fastapi import FastAPI
+from app.routes import router
+
+app = FastAPI(title="Azure Search FastAPI Service", version="1.0")
+
+app.include_router(router)
+🔄 run.sh (for local dev)
+#!/bin/bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+Make it executable:
+
+chmod +x run.sh
+🐳 Optional: Docker Setup
+Let me know if you'd like a full Dockerfile, docker-compose.yml, or CI/CD support for this project.
+
+Would you like me to upload this full project as a GitHub-ready repo or zip?
+
+
+
+
+No file chosenNo file chosen
+ChatGPT can make mistakes. Check important info. See Cookie Preferences.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Absolutely, let's create a complete application using GPT Actions to fetch information from Confluence wiki for user queries. This example will involve setting up FastAPI, integrating with Confluence, using GPT for routing queries, and fetching relevant data.
 
 ### Step-by-Step Guide:
