@@ -1,3 +1,30 @@
+<svg width="400" height="150" xmlns="http://www.w3.org/2000/svg">
+  <!-- UBS logo (replace this with your actual SVG content) -->
+  <g transform="translate(10, 10)">
+    <!-- Example placeholder UBS logo (red circle) -->
+    <circle cx="30" cy="30" r="30" fill="red" />
+    <text x="70" y="40" font-family="Arial" font-size="24" font-weight="bold" fill="black">UBS</text>
+  </g>
+
+  <!-- Firmwide InfraSense text -->
+  <text x="10" y="100" font-family="Arial, sans-serif" font-size="28">
+    <tspan font-weight="bold" fill="black">Firmwide </tspan>
+    <tspan fill="red" font-style="italic">InfraSense</tspan>
+  </text>
+</svg>
+
+
+
+
+<svg width="300" height="60" xmlns="http://www.w3.org/2000/svg">
+  <text x="10" y="40" font-family="Arial, sans-serif" font-size="32">
+    <tspan font-weight="bold" fill="black">Firmwide </tspan>
+    <tspan fill="red" font-style="italic">InfraSense</tspan>
+  </text>
+</svg>
+
+
+
 Create python application to get pods logs from azure Kubernetes service
 ChatGPT said:
 ChatGPT
