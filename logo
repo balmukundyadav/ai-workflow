@@ -277,3 +277,47 @@ If you're designing UI elements, #CCE5FF (Baby Blue) or #F0F8FF (Alice Blue) are
 
 
 
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="bubble1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00C6FF"/>
+      <stop offset="100%" stop-color="#0072FF"/>
+    </linearGradient>
+    <linearGradient id="bubble2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF6A00"/>
+      <stop offset="100%" stop-color="#EE0979"/>
+    </linearGradient>
+  </defs>
+
+  <!-- First chat bubble -->
+  <path d="M18 12h20a10 10 0 0 1 10 10v8a10 10 0 0 1 -10 10h-8l-8 6v-6h-4a10 10 0 0 1 -10 -10v-8a10 10 0 0 1 10 -10z"
+        fill="url(#bubble1)"/>
+
+  <!-- Second overlapping bubble -->
+  <path d="M26 26h20a10 10 0 0 1 10 10v8a10 10 0 0 1 -10 10h-4v6l-8 -6h-8a10 10 0 0 1 -10 -10v-8a10 10 0 0 1 10 -10z"
+        fill="url(#bubble2)" opacity="0.9"/>
+
+  <!-- Typing dots -->
+  <circle cx="28" cy="24" r="2" fill="white"/>
+  <circle cx="34" cy="24" r="2" fill="white"/>
+  <circle cx="40" cy="24" r="2" fill="white"/>
+</svg>
+
+
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="bubble1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00C6FF"/>
+      <stop offset="100%" stop-color="#0072FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Single chat bubble -->
+  <path d="M18 12h20a10 10 0 0 1 10 10v8a10 10 0 0 1 -10 10h-8l-8 6v-6h-4a10 10 0 0 1 -10 -10v-8a10 10 0 0 1 10 -10z"
+        fill="url(#bubble1)"/>
+
+  <!-- Typing dots -->
+  <circle cx="28" cy="24" r="2" fill="white"/>
+  <circle cx="34" cy="24" r="2" fill="white"/>
+  <circle cx="40" cy="24" r="2" fill="white"/>
+</svg>
