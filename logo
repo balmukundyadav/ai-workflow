@@ -192,3 +192,88 @@ Static:
 
 #E2EAF4
 If you're designing UI elements, #CCE5FF (Baby Blue) or #F0F8FF (Alice Blue) are great for light themes, backgrounds, and badges.
+
+
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="chatDarkGradient" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#0F2027"/>
+      <stop offset="100%" stop-color="#203A43"/>
+    </radialGradient>
+    <linearGradient id="pulseDarkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6A00" />
+      <stop offset="100%" stop-color="#EE0979" />
+    </linearGradient>
+  </defs>
+
+  <circle cx="200" cy="200" r="120" fill="url(#chatDarkGradient)">
+    <animate attributeName="r" values="110;130;110" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="1;0.7;1" dur="4s" repeatCount="indefinite"/>
+  </circle>
+
+  <path d="M140 140 h120 a20 20 0 0 1 20 20 v60 a20 20 0 0 1 -20 20 h-60 l-30 30 v-30 h-30 a20 20 0 0 1 -20 -20 v-60 a20 20 0 0 1 20 -20 z"
+        fill="#1E1E1E" stroke="#FF007A" stroke-width="4" opacity="0.9">
+    <animate attributeName="opacity" values="0.9;1;0.9" dur="2s" repeatCount="indefinite"/>
+  </path>
+
+  <circle cx="170" cy="190" r="8" fill="url(#pulseDarkGradient)">
+    <animate attributeName="r" values="6;10;6" dur="1.5s" begin="0s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="200" cy="190" r="8" fill="url(#pulseDarkGradient)">
+    <animate attributeName="r" values="6;10;6" dur="1.5s" begin="0.3s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="230" cy="190" r="8" fill="url(#pulseDarkGradient)">
+    <animate attributeName="r" values="6;10;6" dur="1.5s" begin="0.6s" repeatCount="indefinite"/>
+  </circle>
+</svg>
+
+
+
+
+
+
+
+
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="chatDarkGradient" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#0F2027"/>
+      <stop offset="100%" stop-color="#203A43"/>
+    </radialGradient>
+    <linearGradient id="pulseDarkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6A00" />
+      <stop offset="100%" stop-color="#EE0979" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Circle -->
+  <circle cx="200" cy="200" r="120" fill="url(#chatDarkGradient)" opacity="1"/>
+
+  <!-- Chat Bubble -->
+  <path d="M140 140 h120 a20 20 0 0 1 20 20 v60 a20 20 0 0 1 -20 20 h-60 l-30 30 v-30 h-30 a20 20 0 0 1 -20 -20 v-60 a20 20 0 0 1 20 -20 z"
+        fill="#1E1E1E" stroke="#FF007A" stroke-width="4" opacity="0.9"/>
+
+  <!-- Typing Dots -->
+  <circle cx="170" cy="190" r="8" fill="url(#pulseDarkGradient)"/>
+  <circle cx="200" cy="190" r="8" fill="url(#pulseDarkGradient)"/>
+  <circle cx="230" cy="190" r="8" fill="url(#pulseDarkGradient)"/>
+</svg>
+
+
+
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="darkUserGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6A00"/>
+      <stop offset="100%" stop-color="#EE0979"/>
+    </linearGradient>
+  </defs>
+  <!-- Head -->
+  <circle cx="32" cy="20" r="10" fill="url(#darkUserGradient)" />
+  
+  <!-- Shoulders / Body -->
+  <path d="M16 50c0-8.8 7.2-16 16-16s16 7.2 16 16v2H16v-2z" fill="url(#darkUserGradient)" />
+</svg>
+
+
+
